@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Grid } from "../components/Grid";
 import { Button } from "../components/Button";
 import { PreviewModal } from "../components/PreviewModal";
@@ -49,6 +49,13 @@ export const SelectionScreen: React.FC<SelectionScreenProps> = ({
   const [previewIndex, setPreviewIndex] = useState(-1);
 
   const isFullTab = typeof window !== "undefined" && window.innerWidth > 900;
+
+  // Original position of each item in the full unfiltered list (1-based)
+  const mediaIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    mediaItems.forEach((m, i) => map.set(m.id, i + 1));
+    return map;
+  }, [mediaItems]);
 
   // Determine Grid dimensions based on size preferences
   const getGridParams = () => {
@@ -235,6 +242,20 @@ export const SelectionScreen: React.FC<SelectionScreenProps> = ({
     ? Math.max(0, collection.collection_media_count - selectedItems.length)
     : selectedItems.length;
 
+  // Preload adjacent video URLs when preview is open so navigation feels instant
+  const getAdjacentVideoUrls = (): string[] => {
+    if (previewMedia === null) return [];
+    const urls: string[] = [];
+    for (const offset of [-1, 1]) {
+      const item = filteredItems[previewIndex + offset];
+      if (item?.media_type === 2 && "video_versions" in item) {
+        const vv = (item as { video_versions: { url: string }[] }).video_versions;
+        if (vv?.[0]?.url) urls.push(vv[0].url);
+      }
+    }
+    return urls;
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* Header */}
@@ -385,6 +406,16 @@ export const SelectionScreen: React.FC<SelectionScreenProps> = ({
                   )}
                 </div>
 
+                {/* Original position number (stays correct even when filtered) */}
+                <div style={{
+                  position: "absolute", bottom: "4px", right: "4px",
+                  background: "rgba(0,0,0,0.55)", color: "white",
+                  fontSize: "9px", padding: "1px 5px", borderRadius: "3px", zIndex: 3,
+                  pointerEvents: "none",
+                }}>
+                  #{mediaIndexMap.get(media.id)}
+                </div>
+
                 {/* Hover control bar */}
                 <div className="tile-overlay">
                   <button
@@ -480,6 +511,11 @@ export const SelectionScreen: React.FC<SelectionScreenProps> = ({
           </Button>
         </div>
       </div>
+
+      {/* Silently preload prev/next video so navigation feels instant */}
+      {getAdjacentVideoUrls().map((url) => (
+        <video key={url} src={url} preload="auto" muted style={{ display: "none" }} />
+      ))}
 
       {/* Media Preview Modal */}
       {previewMedia && (

@@ -42,6 +42,8 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [videoNaturalWidth, setVideoNaturalWidth] = useState(0);
+  const [videoNaturalHeight, setVideoNaturalHeight] = useState(0);
   const [volume, setVolume] = useState(videoMutedByDefault ? 0 : initialVolume);
   const [isMuted, setIsMuted] = useState(videoMutedByDefault);
   const [speed, setSpeed] = useState(1.0);
@@ -71,6 +73,8 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
     setCurrentTime(0);
     setDuration(0);
     setSpeed(1.0);
+    setVideoNaturalWidth(0);
+    setVideoNaturalHeight(0);
     setControlsVisible(true);
     const saved = rotationMap.current[media.id] ?? 0;
     setRotation(saved);
@@ -155,7 +159,27 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
   };
 
   const handleLoadedMetadata = () => {
-    if (videoRef.current) setDuration(videoRef.current.duration);
+    const video = videoRef.current;
+    if (video) {
+      setDuration(video.duration);
+      setVideoNaturalWidth(video.videoWidth);
+      setVideoNaturalHeight(video.videoHeight);
+    }
+  };
+
+  // When video is rotated 90/270, auto-scale to fill the black space
+  const computeVideoTransform = (): string | undefined => {
+    const parts: string[] = [];
+    if (rotation) parts.push(`rotate(${rotation}deg)`);
+    if (rotation === 90 || rotation === 270) {
+      if (videoNaturalWidth && videoNaturalHeight) {
+        const ar = videoNaturalWidth / videoNaturalHeight;
+        // Scale by aspect ratio so the rotated video fills the container
+        const autoScale = ar > 1 ? ar : 1 / ar;
+        parts.push(`scale(${Math.min(autoScale, 2.5).toFixed(3)})`);
+      }
+    }
+    return parts.length > 0 ? parts.join(" ") : undefined;
   };
 
   const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -269,6 +293,15 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
             )}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            {isCarousel && onNext && (
+              <button
+                onClick={() => { rotationMap.current[media.id] = rotation; onNext(); }}
+                style={{ background: "var(--surface-hover)", border: "1px solid var(--border)", borderRadius: "5px", color: "var(--text-muted)", cursor: "pointer", padding: "3px 8px", fontSize: "11px" }}
+                title="Skip entire carousel to next post"
+              >
+                Skip ⏭
+              </button>
+            )}
             <button
               onClick={handleFullscreen}
               style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "4px", lineHeight: 0 }}
@@ -349,7 +382,7 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
               onClick={togglePlay}
               style={{
                 maxWidth: "100%", maxHeight: "100%", outline: "none", cursor: "pointer",
-                transform: rotation ? `rotate(${rotation}deg)` : undefined,
+                transform: computeVideoTransform(),
                 transition: "transform 0.2s ease",
               }}
             />

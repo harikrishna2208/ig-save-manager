@@ -119,32 +119,11 @@ export const CollectionsScreen: React.FC<CollectionsScreenProps> = ({
             return (
               <div
                 key={col.collection_id}
-                className={`tile${col.collection_id === lastSelectedCollectionId ? " selected" : ""}`}
+                style={{ display: "flex", flexDirection: "column", gap: "5px", cursor: "pointer" }}
                 onClick={() => onSelectCollection(col)}
               >
-                {/* Overlay with title details */}
-                <div
-                  style={{
-                    position: "absolute",
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    padding: "8px",
-                    background: "linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%)",
-                    color: "white",
-                    zIndex: 2,
-                    display: "flex",
-                    flexDirection: "column",
-                  }}
-                >
-                  <span style={{ fontWeight: 600, fontSize: "12px", textShadow: "1px 1px 2px black", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {col.collection_name}
-                  </span>
-                  <span style={{ fontSize: "10px", opacity: 0.8, textShadow: "1px 1px 2px black" }}>
-                    {col.collection_media_count} post(s)
-                  </span>
-                </div>
-
+                <div className={`tile${col.collection_id === lastSelectedCollectionId ? " selected" : ""}`}
+                  style={{ cursor: "pointer" }}>
                 {/* Cover pictures quadrant grid */}
                 <div
                   style={{
@@ -191,6 +170,16 @@ export const CollectionsScreen: React.FC<CollectionsScreenProps> = ({
                       Empty
                     </div>
                   )}
+                </div>
+                </div>
+                {/* Name and count below the tile image */}
+                <div style={{ padding: "0 2px" }}>
+                  <div style={{ fontSize: "11px", fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {col.collection_name}
+                  </div>
+                  <div style={{ fontSize: "10px", color: "var(--text-muted)" }}>
+                    {col.collection_media_count} posts
+                  </div>
                 </div>
               </div>
             );
