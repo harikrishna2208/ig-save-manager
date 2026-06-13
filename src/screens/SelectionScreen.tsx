@@ -33,19 +33,28 @@ export const SelectionScreen: React.FC<SelectionScreenProps> = ({
   // Bulk download progress state
   const [downloadProgress, setDownloadProgress] = useState<{ done: number; total: number } | null>(null);
 
-  // Mute preference (local copy so it updates across previews in the same session)
+  // Audio / playback prefs — local copies that update within the session and persist
   const [mutedByDefault, setMutedByDefault] = useState(prefs.videoMutedByDefault);
+  const [currentVolume, setCurrentVolume] = useState(prefs.videoVolume ?? 0.75);
+  const [autoplayVideos, setAutoplayVideos] = useState(prefs.autoplayVideos);
 
-  // Search + filter states
-  const [searchQuery, setSearchQuery] = useState("");
+  // Type filter state
   const [typeFilter, setTypeFilter] = useState<"all" | "image" | "video" | "carousel">("all");
+
+  // Column count override (null = use preset default)
+  const [columnOverride, setColumnOverride] = useState<number | null>(null);
 
   // Media Preview states
   const [previewMedia, setPreviewMedia] = useState<Media | null>(null);
   const [previewIndex, setPreviewIndex] = useState(-1);
 
+  const isFullTab = typeof window !== "undefined" && window.innerWidth > 900;
+
   // Determine Grid dimensions based on size preferences
   const getGridParams = () => {
+    if (isFullTab) {
+      return { columns: 7, rowHeight: 130, height: Math.max(400, window.innerHeight - 240) };
+    }
     switch (prefs.popupSize) {
       case "compact":
         return { columns: 3, rowHeight: 115, height: 350 };
@@ -57,15 +66,18 @@ export const SelectionScreen: React.FC<SelectionScreenProps> = ({
     }
   };
 
-  const { columns, rowHeight, height: containerHeight } = getGridParams();
+  const { columns: defaultColumns, rowHeight, height: containerHeight } = getGridParams();
+  const columns = columnOverride ?? defaultColumns;
 
   const filteredItems = mediaItems.filter((m) => {
-    if (searchQuery && !m.code?.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     if (typeFilter === "image" && m.media_type !== 1) return false;
     if (typeFilter === "video" && m.media_type !== 2) return false;
     if (typeFilter === "carousel" && m.media_type !== 8) return false;
     return true;
   });
+
+  const [sortOldest, setSortOldest] = useState(false);
+  const [loadingAll, setLoadingAll] = useState(false);
 
   const fetchingRef = useRef(false);
 
@@ -108,6 +120,52 @@ export const SelectionScreen: React.FC<SelectionScreenProps> = ({
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchMedia(); }, []);
+
+  const handleSortOldest = async () => {
+    if (loadingAll) return;
+    const isAllMedia = collection.collection_id === "ALL_MEDIA_AUTO_COLLECTION";
+    const totalCount = collection.collection_media_count;
+    if (isAllMedia || totalCount > 100) {
+      const ok = window.confirm(
+        `This will load all ${totalCount > 0 ? totalCount : "your"} saved posts before sorting — it may take a while. Continue?`
+      );
+      if (!ok) return;
+    }
+    setLoadingAll(true);
+    // Exhaust all pages
+    let cursor = nextMaxId;
+    let more = hasMore;
+    const allItems: Media[] = [...mediaItems];
+    try {
+      while (more && cursor) {
+        let response;
+        if (collection.collection_id === "ALL_MEDIA_AUTO_COLLECTION") {
+          response = await InstagramApiClient.getAllSavedMedia(cursor);
+        } else {
+          response = await InstagramApiClient.getCollectionMedia(collection.collection_id, cursor);
+        }
+        const newItems = response.items || [];
+        const existingIds = new Set(allItems.map((m) => m.id));
+        for (const item of newItems) {
+          if (!existingIds.has(item.id)) allItems.push(item);
+        }
+        cursor = response.next_max_id || "";
+        more = !!response.more_available && !!response.next_max_id;
+      }
+      setMediaItems([...allItems].reverse());
+      setHasMore(false);
+      setSortOldest(true);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingAll(false);
+    }
+  };
+
+  const handleSortNewest = () => {
+    setSortOldest(false);
+    setMediaItems((prev) => [...prev].reverse());
+  };
 
   const handleTileClick = (media: Media) => {
     setSelectedItems((prev) => {
@@ -204,29 +262,32 @@ export const SelectionScreen: React.FC<SelectionScreenProps> = ({
             </span>
           </div>
         </div>
-        <div style={{ fontSize: "12px", fontWeight: 600, color: "var(--primary)" }}>
-          Selected: {unsaveCount}
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <button
+            onClick={sortOldest ? handleSortNewest : handleSortOldest}
+            disabled={loadingAll}
+            style={{
+              background: "none",
+              border: "1px solid var(--border)",
+              borderRadius: "5px",
+              color: sortOldest ? "var(--primary)" : "var(--text-muted)",
+              cursor: "pointer",
+              fontSize: "10px",
+              padding: "3px 7px",
+            }}
+            title={sortOldest ? "Showing oldest first — click for newest first" : "Load all & sort oldest first"}
+          >
+            {loadingAll ? "Loading…" : sortOldest ? "Oldest ↑" : "Newest ↓"}
+          </button>
+          <div style={{ fontSize: "12px", fontWeight: 600, color: "var(--primary)" }}>
+            Selected: {unsaveCount}
+          </div>
         </div>
       </div>
 
-      {/* Search + Filter Bar */}
+      {/* Filter Bar */}
       <div style={{ padding: "6px 12px", borderBottom: "1px solid var(--border)", display: "flex", gap: "8px", alignItems: "center" }}>
-        <input
-          type="text"
-          placeholder="Search by post code…"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          style={{
-            flex: 1,
-            background: "var(--surface)",
-            border: "1px solid var(--border)",
-            borderRadius: "6px",
-            padding: "4px 8px",
-            fontSize: "11px",
-            color: "var(--text)",
-            outline: "none",
-          }}
-        />
+        <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Filter:</span>
         <select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value as typeof typeFilter)}
@@ -240,24 +301,41 @@ export const SelectionScreen: React.FC<SelectionScreenProps> = ({
             cursor: "pointer",
           }}
         >
-          <option value="all">All</option>
+          <option value="all">All Types</option>
           <option value="image">Images</option>
           <option value="video">Videos</option>
           <option value="carousel">Carousels</option>
         </select>
-        {(searchQuery || typeFilter !== "all") && (
+        {typeFilter !== "all" && (
           <button
             style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: "14px", lineHeight: 1 }}
-            onClick={() => { setSearchQuery(""); setTypeFilter("all"); }}
-            title="Clear filters"
+            onClick={() => setTypeFilter("all")}
+            title="Clear filter"
           >
             &times;
           </button>
         )}
+
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "4px" }}>
+          <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Size:</span>
+          <button
+            disabled={columns <= 2}
+            onClick={() => setColumnOverride(Math.max(2, columns - 1))}
+            style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "4px", color: "var(--text)", cursor: "pointer", padding: "2px 7px", fontSize: "13px", lineHeight: 1 }}
+            title="Fewer columns (bigger tiles)"
+          >−</button>
+          <span style={{ fontSize: "11px", color: "var(--text)", minWidth: "16px", textAlign: "center" }}>{columns}</span>
+          <button
+            disabled={columns >= 8}
+            onClick={() => setColumnOverride(Math.min(8, columns + 1))}
+            style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "4px", color: "var(--text)", cursor: "pointer", padding: "2px 7px", fontSize: "13px", lineHeight: 1 }}
+            title="More columns (smaller tiles)"
+          >+</button>
+        </div>
       </div>
 
       {/* Grid Container */}
-      <div className="content-area" style={{ padding: "8px" }}>
+      <div className="content-area" style={{ padding: "8px", position: "relative" }}>
         {error && (
           <div style={{ textAlign: "center", padding: "16px", color: "var(--danger)" }}>
             <p style={{ marginBottom: "10px" }}>{error}</p>
@@ -407,11 +485,25 @@ export const SelectionScreen: React.FC<SelectionScreenProps> = ({
       {previewMedia && (
         <PreviewModal
           media={previewMedia}
-          autoplayVideos={prefs.autoplayVideos}
+          autoplayVideos={autoplayVideos}
           videoMutedByDefault={mutedByDefault}
+          initialVolume={currentVolume}
           onMuteChange={(muted) => {
             setMutedByDefault(muted);
             StorageService.setPreferences({ videoMutedByDefault: muted });
+          }}
+          onVolumeChange={(vol) => {
+            setCurrentVolume(vol);
+            StorageService.setPreferences({ videoVolume: vol });
+          }}
+          onAutoplayChange={(auto) => {
+            setAutoplayVideos(auto);
+            StorageService.setPreferences({ autoplayVideos: auto });
+          }}
+          onUnsave={() => {
+            const item = previewMedia;
+            setPreviewMedia(null);
+            onStartQueue([item], collection.collection_id);
           }}
           onClose={() => setPreviewMedia(null)}
           onNext={

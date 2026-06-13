@@ -67,11 +67,22 @@ export const App: React.FC = () => {
     checkSessionAndInitialize();
   }, []);
 
+  const isFullTab = typeof window !== "undefined" && window.innerWidth > 900;
+
   // Preset size layout mapping class
   const getContainerPresetClass = () => {
+    if (isFullTab) return "preset-fulltab";
     if (!prefs) return "preset-normal";
     return `preset-${prefs.popupSize}`;
   };
+
+  // Mark body so CSS can apply full-tab-specific rules
+  useEffect(() => {
+    if (isFullTab) {
+      document.body.classList.add("fulltab-mode");
+    }
+    return () => document.body.classList.remove("fulltab-mode");
+  }, [isFullTab]);
 
   const renderScreen = () => {
     if (!prefs) return null;
@@ -130,5 +141,44 @@ export const App: React.FC = () => {
     }
   };
 
-  return <div className={`app-container ${getContainerPresetClass()}`}>{renderScreen()}</div>;
+  const handleOpenInTab = () => {
+    if (typeof chrome !== "undefined" && chrome.runtime) {
+      chrome.tabs.create({ url: chrome.runtime.getURL("popup.html") });
+    }
+  };
+
+  return (
+    <div className={`app-container ${getContainerPresetClass()}`} style={{ position: "relative" }}>
+      {renderScreen()}
+      {route !== "LOADING" && (
+        <button
+          onClick={handleOpenInTab}
+          title="Open in full tab"
+          style={{
+            position: "absolute",
+            bottom: "16px",
+            right: "16px",
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: "6px",
+            color: "var(--text-muted)",
+            cursor: "pointer",
+            padding: "4px 6px",
+            lineHeight: 0,
+            zIndex: 5,
+            opacity: 0.6,
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+          onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.6")}
+          aria-label="Open in Tab"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+            <polyline points="15 3 21 3 21 9"/>
+            <line x1="10" y1="14" x2="21" y2="3"/>
+          </svg>
+        </button>
+      )}
+    </div>
+  );
 };

@@ -77,7 +77,13 @@ html, body {
 
 .preset-expanded {
   width: 800px;
-  height: 650px;
+  height: 650px
+}
+
+.preset-fulltab {
+  width: 100%;
+  height: 100vh;
+  max-width: 100%;
 }
 
 /* Glassmorphic layouts */
@@ -338,6 +344,29 @@ html, body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+/* Full-tab mode: make the layout feel like a proper web app, not a popup */
+body.fulltab-mode .header-bar {
+  padding: 18px 40px;
+}
+
+body.fulltab-mode .footer-bar {
+  padding: 18px 40px;
+}
+
+body.fulltab-mode .content-area {
+  padding: 20px 40px;
+}
+
+body.fulltab-mode .collection-grid {
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 20px;
+}
+
+body.fulltab-mode .modal-content {
+  max-width: 900px;
+  height: 90vh;
 }
 
 /* Logger Drawer */

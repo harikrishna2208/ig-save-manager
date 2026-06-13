@@ -10,7 +10,11 @@ interface PreviewModalProps {
   onPrev?: () => void;
   autoplayVideos?: boolean;
   videoMutedByDefault?: boolean;
+  initialVolume?: number;
   onMuteChange?: (muted: boolean) => void;
+  onVolumeChange?: (volume: number) => void;
+  onAutoplayChange?: (autoplay: boolean) => void;
+  onUnsave?: () => void;
 }
 
 export const PreviewModal: React.FC<PreviewModalProps> = ({
@@ -19,118 +23,139 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
   onNext,
   onPrev,
   autoplayVideos = true,
-  videoMutedByDefault = true,
+  videoMutedByDefault = false,
+  initialVolume = 0.75,
   onMuteChange,
+  onVolumeChange,
+  onAutoplayChange,
+  onUnsave,
 }) => {
-  // Carousel active index state
   const [carouselIndex, setCarouselIndex] = useState(0);
-
-  // Image Zoom states
   const [zoom, setZoom] = useState(1.0);
-
-  // Rotation state (degrees: 0, 90, 180, 270)
   const [rotation, setRotation] = useState(0);
-
-  // Fullscreen state
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Video player custom states
+  // Per-media rotation memory: survives prev/next navigation within this session
+  const rotationMap = useRef<Record<string, number>>({});
+
+  // Video states
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(videoMutedByDefault ? 0 : 0.8);
+  const [volume, setVolume] = useState(videoMutedByDefault ? 0 : initialVolume);
   const [isMuted, setIsMuted] = useState(videoMutedByDefault);
   const [speed, setSpeed] = useState(1.0);
+  const [localAutoplay, setLocalAutoplay] = useState(autoplayVideos);
+
+  // Controls + nav visibility (fades after 2.5s of no mouse movement)
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Nav arrows hover
+  const [navHovered, setNavHovered] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
 
-  // Reset active configurations on media shifts
+  const resetControlsTimer = () => {
+    setControlsVisible(true);
+    if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+    controlsTimerRef.current = setTimeout(() => setControlsVisible(false), 2500);
+  };
+
+  // On media change: save current rotation, restore saved rotation for new media
   useEffect(() => {
     setCarouselIndex(0);
     setZoom(1.0);
-    setRotation(0);
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
     setSpeed(1.0);
+    setControlsVisible(true);
+    const saved = rotationMap.current[media.id] ?? 0;
+    setRotation(saved);
   }, [media.id]);
 
-  // Track fullscreen state changes (e.g. user presses Escape to exit)
-  useEffect(() => {
-    const handler = () => setIsFullscreen(!!document.fullscreenElement);
-    document.addEventListener("fullscreenchange", handler);
-    return () => document.removeEventListener("fullscreenchange", handler);
-  }, []);
-
-  // Bind Keyboard Listeners for Accessibility
+  // Keyboard listeners
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onClose();
-      } else if (e.key === "ArrowRight") {
-        handleNextClick();
-      } else if (e.key === "ArrowLeft") {
-        handlePrevClick();
-      }
+      if (e.key === "Escape") handleClose();
+      else if (e.key === "ArrowRight") handleNextClick();
+      else if (e.key === "ArrowLeft") handlePrevClick();
+      else if (e.key === " ") { e.preventDefault(); togglePlay(); }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [media, carouselIndex]);
+  }, [media, carouselIndex, isPlaying]);
 
-  // Handle Carousel & Multi-post transitions
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+    };
+  }, []);
+
   const isCarousel = media.media_type === 8 && "carousel_media" in media;
   const carouselItems = isCarousel ? (media as CarouselMedia).carousel_media : [];
 
   const handleNextClick = () => {
     if (isCarousel && carouselIndex < carouselItems.length - 1) {
+      rotationMap.current[media.id] = rotation;
       setCarouselIndex(carouselIndex + 1);
       setZoom(1.0);
     } else if (onNext) {
+      rotationMap.current[media.id] = rotation;
       onNext();
     }
   };
 
   const handlePrevClick = () => {
     if (isCarousel && carouselIndex > 0) {
+      rotationMap.current[media.id] = rotation;
       setCarouselIndex(carouselIndex - 1);
       setZoom(1.0);
     } else if (onPrev) {
+      rotationMap.current[media.id] = rotation;
       onPrev();
     }
   };
 
-  // Resolve current active item context
+  const handleClose = () => {
+    // Release video memory before closing
+    const video = videoRef.current;
+    if (video) {
+      video.pause();
+      video.src = "";
+      video.load();
+    }
+    onClose();
+  };
+
   const activeItem = isCarousel ? carouselItems[carouselIndex] : media;
   const isVideo = activeItem.media_type === 2;
 
-  // Zoom control triggers
   const handleZoomIn = () => setZoom((z) => Math.min(3.0, z + 0.25));
   const handleZoomOut = () => setZoom((z) => Math.max(0.5, z - 0.25));
   const handleZoomReset = () => setZoom(1.0);
 
-  // Custom Video playback controllers
   const togglePlay = () => {
     const video = videoRef.current;
     if (!video) return;
     if (isPlaying) {
       video.pause();
+      setIsPlaying(false);
     } else {
-      video.play().catch((err) => console.log("Play failed", err));
+      video.play().catch(() => {});
+      setIsPlaying(true);
     }
-    setIsPlaying(!isPlaying);
   };
 
   const handleTimeUpdate = () => {
-    if (videoRef.current) {
-      setCurrentTime(videoRef.current.currentTime);
-    }
+    if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
   };
 
   const handleLoadedMetadata = () => {
-    if (videoRef.current) {
-      setDuration(videoRef.current.duration);
-    }
+    if (videoRef.current) setDuration(videoRef.current.duration);
   };
 
   const handleSeekChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -147,8 +172,11 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
     const vol = parseFloat(e.target.value);
     video.volume = vol;
     setVolume(vol);
-    setIsMuted(vol === 0);
-    video.muted = vol === 0;
+    const muted = vol === 0;
+    setIsMuted(muted);
+    video.muted = muted;
+    onVolumeChange?.(vol);
+    if (!muted) onMuteChange?.(false);
   };
 
   const toggleMute = () => {
@@ -158,22 +186,18 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
     video.muted = nextMuted;
     setIsMuted(nextMuted);
     if (!nextMuted && volume === 0) {
-      video.volume = 0.5;
-      setVolume(0.5);
+      const vol = initialVolume;
+      video.volume = vol;
+      setVolume(vol);
     }
     onMuteChange?.(nextMuted);
   };
 
-  const handleRotate = () => setRotation((r) => (r + 90) % 360);
+  const handleRotateCCW = () => setRotation((r) => (r - 90 + 360) % 360);
+  const handleRotateCW = () => setRotation((r) => (r + 90) % 360);
   const handleRotateReset = () => setRotation(0);
 
-  const handleFullscreen = () => {
-    if (document.fullscreenElement) {
-      document.exitFullscreen();
-    } else {
-      modalRef.current?.requestFullscreen();
-    }
-  };
+  const handleFullscreen = () => setIsFullscreen((f) => !f);
 
   const handleSpeedChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const video = videoRef.current;
@@ -183,20 +207,26 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
     setSpeed(val);
   };
 
+  const toggleAutoplay = () => {
+    const next = !localAutoplay;
+    setLocalAutoplay(next);
+    onAutoplayChange?.(next);
+  };
+
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
     const s = Math.floor(secs % 60);
     return `${m}:${s < 10 ? "0" : ""}${s}`;
   };
 
-  // AutoPlay synchronization on element loading
+  // Sync video element when active item changes
   useEffect(() => {
     const video = videoRef.current;
     if (video && isVideo) {
       video.muted = isMuted;
       video.volume = isMuted ? 0 : volume;
       video.playbackRate = speed;
-      if (autoplayVideos) {
+      if (localAutoplay) {
         video.play()
           .then(() => setIsPlaying(true))
           .catch(() => setIsPlaying(false));
@@ -204,18 +234,37 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
     }
   }, [activeItem.id, isVideo]);
 
+  const controlBarStyle: React.CSSProperties = {
+    transition: "opacity 0.4s ease",
+    opacity: controlsVisible ? 1 : 0,
+    pointerEvents: controlsVisible ? "auto" : "none",
+  };
+
   return (
-    <div className="modal-backdrop" onClick={onClose} role="dialog" aria-modal="true">
-      <div className="modal-content" ref={modalRef} onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop" onClick={handleClose} role="dialog" aria-modal="true">
+      <div
+        className="modal-content"
+        ref={modalRef}
+        onClick={(e) => e.stopPropagation()}
+        style={isFullscreen ? {
+          position: "fixed",
+          top: 0, left: 0, right: 0, bottom: 0,
+          width: "100%",
+          maxWidth: "unset",
+          height: "100%",
+          borderRadius: 0,
+          zIndex: 200,
+        } : undefined}
+      >
         {/* Header */}
         <div className="modal-header">
           <div style={{ display: "flex", flexDirection: "column" }}>
             <span style={{ fontWeight: 600, fontSize: "14px" }}>
-              Preview Post: {media.code}
+              {media.code ?? "Post Preview"}
             </span>
             {isCarousel && (
               <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
-                Carousel Item {carouselIndex + 1} of {carouselItems.length}
+                {carouselIndex + 1} / {carouselItems.length}
               </span>
             )}
           </div>
@@ -224,7 +273,6 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
               onClick={handleFullscreen}
               style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "4px", lineHeight: 0 }}
               title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
-              aria-label={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
             >
               {isFullscreen ? (
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -239,7 +287,7 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
               )}
             </button>
             <button
-              onClick={onClose}
+              onClick={handleClose}
               style={{ background: "none", border: "none", color: "var(--text)", fontSize: "20px", cursor: "pointer", padding: "4px" }}
               aria-label="Close Preview"
             >
@@ -249,53 +297,43 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
         </div>
 
         {/* View Body */}
-        <div className="modal-body">
+        <div
+          className="modal-body"
+          onMouseMove={isVideo ? resetControlsTimer : undefined}
+          onMouseEnter={() => setNavHovered(true)}
+          onMouseLeave={() => { setNavHovered(false); }}
+        >
           {/* Navigation Arrows */}
           {(carouselIndex > 0 || onPrev) && (
             <button
               onClick={handlePrevClick}
               style={{
-                position: "absolute",
-                left: "8px",
-                zIndex: 10,
-                backgroundColor: "rgba(0,0,0,0.6)",
-                border: "none",
-                borderRadius: "50%",
-                width: "36px",
-                height: "36px",
-                color: "white",
-                cursor: "pointer",
-                fontSize: "18px",
+                position: "absolute", left: "8px", zIndex: 10,
+                backgroundColor: "rgba(0,0,0,0.6)", border: "none",
+                borderRadius: "50%", width: "36px", height: "36px",
+                color: "white", cursor: "pointer", fontSize: "18px",
+                opacity: navHovered ? 1 : 0,
+                transition: "opacity 0.2s ease",
               }}
-              aria-label="Previous Post"
-            >
-              &#10094;
-            </button>
+              aria-label="Previous"
+            >&#10094;</button>
           )}
-
           {(carouselIndex < carouselItems.length - 1 || onNext) && (
             <button
               onClick={handleNextClick}
               style={{
-                position: "absolute",
-                right: "8px",
-                zIndex: 10,
-                backgroundColor: "rgba(0,0,0,0.6)",
-                border: "none",
-                borderRadius: "50%",
-                width: "36px",
-                height: "36px",
-                color: "white",
-                cursor: "pointer",
-                fontSize: "18px",
+                position: "absolute", right: "8px", zIndex: 10,
+                backgroundColor: "rgba(0,0,0,0.6)", border: "none",
+                borderRadius: "50%", width: "36px", height: "36px",
+                color: "white", cursor: "pointer", fontSize: "18px",
+                opacity: navHovered ? 1 : 0,
+                transition: "opacity 0.2s ease",
               }}
-              aria-label="Next Post"
-            >
-              &#10095;
-            </button>
+              aria-label="Next"
+            >&#10095;</button>
           )}
 
-          {/* Media Renderer */}
+          {/* Media */}
           {isVideo ? (
             <video
               ref={videoRef}
@@ -304,33 +342,24 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
                   ? (activeItem as { video_versions: { url: string }[] }).video_versions[0].url
                   : undefined
               }
+              loop={localAutoplay}
+              playsInline
               onTimeUpdate={handleTimeUpdate}
               onLoadedMetadata={handleLoadedMetadata}
-              onEnded={() => setIsPlaying(false)}
-              style={{ maxWidth: "100%", maxHeight: "100%", outline: "none", transform: rotation ? `rotate(${rotation}deg)` : undefined, transition: "transform 0.2s ease" }}
-              playsInline
+              onClick={togglePlay}
+              style={{
+                maxWidth: "100%", maxHeight: "100%", outline: "none", cursor: "pointer",
+                transform: rotation ? `rotate(${rotation}deg)` : undefined,
+                transition: "transform 0.2s ease",
+              }}
             />
           ) : (
-            <div
-              style={{
-                width: "100%",
-                height: "100%",
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-                overflow: "auto",
-              }}
-            >
+            <div style={{ width: "100%", height: "100%", display: "flex", justifyContent: "center", alignItems: "center", overflow: "auto" }}>
               <img
-                src={
-                  "image_versions2" in activeItem
-                    ? activeItem.image_versions2.candidates[0].url
-                    : undefined
-                }
+                src={"image_versions2" in activeItem ? activeItem.image_versions2.candidates[0].url : undefined}
                 alt="Post Preview"
                 style={{
-                  maxWidth: "100%",
-                  maxHeight: "100%",
+                  maxWidth: "100%", maxHeight: "100%",
                   transform: `rotate(${rotation}deg) scale(${zoom})`,
                   transition: "transform 0.2s ease",
                   objectFit: "contain",
@@ -340,147 +369,118 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
           )}
         </div>
 
-        {/* Video Control Bar or Zoom Panel */}
+        {/* Video Control Bar */}
         {isVideo && videoRef.current && (
           <div
             style={{
+              ...controlBarStyle,
               padding: "8px 12px",
-              backgroundColor: "rgba(0, 0, 0, 0.8)",
+              backgroundColor: "rgba(0,0,0,0.85)",
               borderTop: "1px solid var(--border)",
               display: "flex",
               flexDirection: "column",
               gap: "6px",
             }}
+            onMouseEnter={() => { setControlsVisible(true); if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current); }}
+            onMouseLeave={() => resetControlsTimer()}
           >
             {/* Seek Bar */}
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ fontSize: "11px", color: "white" }}>{formatTime(currentTime)}</span>
+              <span style={{ fontSize: "11px", color: "white", minWidth: "32px" }}>{formatTime(currentTime)}</span>
               <input
-                type="range"
-                min="0"
-                max={duration || 100}
-                step="0.1"
-                value={currentTime}
+                type="range" min="0" max={duration || 100} step="0.1" value={currentTime}
                 onChange={handleSeekChange}
                 style={{ flex: 1, cursor: "pointer", accentColor: "var(--primary)" }}
               />
-              <span style={{ fontSize: "11px", color: "white" }}>{formatTime(duration)}</span>
+              <span style={{ fontSize: "11px", color: "white", minWidth: "32px", textAlign: "right" }}>{formatTime(duration)}</span>
             </div>
 
-            {/* Sub Controls */}
+            {/* Control row */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <button
-                  onClick={togglePlay}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    color: "white",
-                    cursor: "pointer",
-                    fontSize: "14px",
-                  }}
-                >
-                  {isPlaying ? "Pause" : "Play"}
+              {/* Left: play/mute/volume */}
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <button onClick={togglePlay} style={{ background: "none", border: "none", color: "white", cursor: "pointer", fontSize: "13px", minWidth: "36px" }}>
+                  {isPlaying ? "⏸" : "▶"}
                 </button>
-
-                <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                  <button
-                    onClick={toggleMute}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      color: "white",
-                      cursor: "pointer",
-                      fontSize: "14px",
-                    }}
-                  >
-                    {isMuted ? "Unmute" : "Mute"}
-                  </button>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={isMuted ? 0 : volume}
-                    onChange={handleVolumeChange}
-                    style={{ width: "60px", accentColor: "var(--primary)" }}
-                  />
-                </div>
+                <button onClick={toggleMute} style={{ background: "none", border: "none", color: "white", cursor: "pointer", fontSize: "13px" }}>
+                  {isMuted || volume === 0 ? "🔇" : volume < 0.4 ? "🔈" : "🔊"}
+                </button>
+                <input
+                  type="range" min="0" max="1" step="0.05"
+                  value={isMuted ? 0 : volume}
+                  onChange={handleVolumeChange}
+                  style={{ width: "56px", accentColor: "var(--primary)" }}
+                />
               </div>
 
-              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              {/* Right: rotation, speed, autoplay */}
+              <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                 <button
-                  onClick={handleRotate}
-                  style={{ background: "none", border: "1px solid var(--border)", borderRadius: "4px", color: "white", cursor: "pointer", padding: "2px 6px", fontSize: "11px" }}
-                  title="Rotate 90°"
-                >
-                  ↻
-                </button>
+                  onClick={handleRotateCCW}
+                  style={{ background: "none", border: "1px solid var(--border)", borderRadius: "4px", color: "white", cursor: "pointer", padding: "2px 5px", fontSize: "12px" }}
+                  title="Rotate left (CCW)"
+                >↺</button>
                 {rotation !== 0 && (
                   <button
                     onClick={handleRotateReset}
-                    style={{ background: "none", border: "1px solid var(--border)", borderRadius: "4px", color: "var(--text-muted)", cursor: "pointer", padding: "2px 6px", fontSize: "11px" }}
+                    style={{ background: "none", border: "1px solid var(--border)", borderRadius: "4px", color: "var(--text-muted)", cursor: "pointer", padding: "2px 5px", fontSize: "10px" }}
                     title="Reset rotation"
-                  >
-                    {rotation}°
-                  </button>
+                  >{rotation}°</button>
                 )}
+                <button
+                  onClick={handleRotateCW}
+                  style={{ background: "none", border: "1px solid var(--border)", borderRadius: "4px", color: "white", cursor: "pointer", padding: "2px 5px", fontSize: "12px" }}
+                  title="Rotate right (CW)"
+                >↻</button>
                 <select
-                  value={speed}
-                  onChange={handleSpeedChange}
-                  style={{
-                    backgroundColor: "transparent",
-                    color: "white",
-                    border: "1px solid var(--border)",
-                    borderRadius: "4px",
-                    padding: "2px 4px",
-                    fontSize: "11px",
-                    cursor: "pointer",
-                  }}
+                  value={speed} onChange={handleSpeedChange}
+                  style={{ backgroundColor: "transparent", color: "white", border: "1px solid var(--border)", borderRadius: "4px", padding: "2px 4px", fontSize: "11px", cursor: "pointer" }}
                 >
-                  <option value="0.5" style={{ color: "black" }}>0.5x</option>
-                  <option value="1.0" style={{ color: "black" }}>1.0x</option>
-                  <option value="1.5" style={{ color: "black" }}>1.5x</option>
-                  <option value="2.0" style={{ color: "black" }}>2.0x</option>
+                  <option value="0.5" style={{ color: "black" }}>0.5×</option>
+                  <option value="1.0" style={{ color: "black" }}>1×</option>
+                  <option value="1.5" style={{ color: "black" }}>1.5×</option>
+                  <option value="2.0" style={{ color: "black" }}>2×</option>
                 </select>
+                <button
+                  onClick={toggleAutoplay}
+                  style={{
+                    background: localAutoplay ? "var(--primary)" : "transparent",
+                    border: "1px solid var(--border)", borderRadius: "4px",
+                    color: "white", cursor: "pointer", padding: "2px 6px", fontSize: "10px",
+                  }}
+                  title={localAutoplay ? "Autoplay ON — click to disable" : "Autoplay OFF — click to enable"}
+                >
+                  {localAutoplay ? "Auto ▶" : "Auto ■"}
+                </button>
               </div>
             </div>
           </div>
         )}
 
+        {/* Image controls */}
         {!isVideo && (
-          <div
-            style={{
-              padding: "6px 12px",
-              backgroundColor: "rgba(0, 0, 0, 0.8)",
-              borderTop: "1px solid var(--border)",
-              display: "flex",
-              justifyContent: "center",
-              gap: "12px",
-            }}
-          >
-            <button className="btn btn-secondary" style={{ padding: "4px 8px", fontSize: "11px" }} onClick={handleZoomOut}>Zoom -</button>
-            <button className="btn btn-secondary" style={{ padding: "4px 8px", fontSize: "11px" }} onClick={handleZoomReset}>Reset ({Math.round(zoom * 100)}%)</button>
-            <button className="btn btn-secondary" style={{ padding: "4px 8px", fontSize: "11px" }} onClick={handleZoomIn}>Zoom +</button>
-            <button className="btn btn-secondary" style={{ padding: "4px 8px", fontSize: "11px" }} onClick={handleRotate} title="Rotate 90°">↻</button>
+          <div style={{ padding: "6px 12px", backgroundColor: "rgba(0,0,0,0.8)", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "center", gap: "8px" }}>
+            <button className="btn btn-secondary" style={{ padding: "4px 8px", fontSize: "11px" }} onClick={handleZoomOut}>−</button>
+            <button className="btn btn-secondary" style={{ padding: "4px 8px", fontSize: "11px" }} onClick={handleZoomReset}>{Math.round(zoom * 100)}%</button>
+            <button className="btn btn-secondary" style={{ padding: "4px 8px", fontSize: "11px" }} onClick={handleZoomIn}>+</button>
+            <div style={{ width: "1px", background: "var(--border)", margin: "0 2px" }} />
+            <button className="btn btn-secondary" style={{ padding: "4px 8px", fontSize: "11px" }} onClick={handleRotateCCW} title="Rotate left">↺</button>
             {rotation !== 0 && (
-              <button className="btn btn-secondary" style={{ padding: "4px 8px", fontSize: "11px" }} onClick={handleRotateReset} title="Reset rotation">{rotation}°</button>
+              <button className="btn btn-secondary" style={{ padding: "4px 8px", fontSize: "11px" }} onClick={handleRotateReset}>{rotation}°</button>
             )}
+            <button className="btn btn-secondary" style={{ padding: "4px 8px", fontSize: "11px" }} onClick={handleRotateCW} title="Rotate right">↻</button>
           </div>
         )}
 
-        {/* Footer Actions */}
+        {/* Footer */}
         <div className="modal-footer">
-          <Button variant="secondary" onClick={onClose}>
-            Back to Grid
-          </Button>
-          <Button
-            onClick={() => {
-              DownloaderService.downloadItem(media);
-            }}
-          >
-            Download Original
-          </Button>
+          <Button variant="secondary" onClick={handleClose}>Back</Button>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <Button onClick={() => DownloaderService.downloadItem(media)}>Download</Button>
+            {onUnsave && (
+              <Button variant="danger" onClick={() => { onUnsave(); handleClose(); }}>Unsave</Button>
+            )}
+          </div>
         </div>
       </div>
     </div>

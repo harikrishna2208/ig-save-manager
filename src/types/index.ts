@@ -89,6 +89,7 @@ export interface UserPreferences {
   waitTime: number;
   autoplayVideos: boolean;
   videoMutedByDefault: boolean;
+  videoVolume: number;
   showPreviewModal: boolean;
   lastSelectedCollectionId?: string;
 }
@@ -100,6 +101,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   includeThumbnails: false,
   waitTime: 1000,
   autoplayVideos: true,
-  videoMutedByDefault: true,
+  videoMutedByDefault: false,
+  videoVolume: 0.75,
   showPreviewModal: true,
 };
