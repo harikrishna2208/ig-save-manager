@@ -78,6 +78,10 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
     setControlsVisible(true);
     const saved = rotationMap.current[media.id] ?? 0;
     setRotation(saved);
+    // Start the auto-hide countdown when in fullscreen video mode
+    if (isFullscreen && (media.media_type === 2 || (media.media_type === 8 && "carousel_media" in media))) {
+      resetControlsTimer();
+    }
   }, [media.id]);
 
   // Keyboard listeners
@@ -258,11 +262,15 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
     }
   }, [activeItem.id, isVideo]);
 
-  const controlBarStyle: React.CSSProperties = {
+  // Auto-hide overlays only when fullscreen button is active; normal modal always shows controls
+  const useOverlayMode = isVideo && isFullscreen;
+
+  const overlayFade: React.CSSProperties = useOverlayMode ? {
     transition: "opacity 0.4s ease",
     opacity: controlsVisible ? 1 : 0,
     pointerEvents: controlsVisible ? "auto" : "none",
-  };
+  } : {};
+
 
   return (
     <div className="modal-backdrop" onClick={handleClose} role="dialog" aria-modal="true">
@@ -270,6 +278,7 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
         className="modal-content"
         ref={modalRef}
         onClick={(e) => e.stopPropagation()}
+        onMouseMove={useOverlayMode ? resetControlsTimer : undefined}
         style={isFullscreen ? {
           position: "fixed",
           top: 0, left: 0, right: 0, bottom: 0,
@@ -281,7 +290,17 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
         } : undefined}
       >
         {/* Header */}
-        <div className="modal-header">
+        <div
+          className="modal-header"
+          style={useOverlayMode ? {
+            ...overlayFade,
+            position: "absolute",
+            top: 0, left: 0, right: 0,
+            zIndex: 20,
+            background: "linear-gradient(to bottom, rgba(0,0,0,0.75) 0%, transparent 100%)",
+            borderBottom: "none",
+          } : isVideo ? { borderBottom: "none" } : undefined}
+        >
           <div style={{ display: "flex", flexDirection: "column" }}>
             <span style={{ fontWeight: 600, fontSize: "14px" }}>
               {media.code ?? "Post Preview"}
@@ -329,12 +348,12 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
           </div>
         </div>
 
-        {/* View Body */}
+        {/* View Body — fills full modal height when video (controls are absolute overlays) */}
         <div
           className="modal-body"
-          onMouseMove={isVideo ? resetControlsTimer : undefined}
           onMouseEnter={() => setNavHovered(true)}
           onMouseLeave={() => { setNavHovered(false); }}
+          style={useOverlayMode ? { position: "absolute", inset: 0 } : undefined}
         >
           {/* Navigation Arrows */}
           {(carouselIndex > 0 || onPrev) && (
@@ -345,8 +364,8 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
                 backgroundColor: "rgba(0,0,0,0.6)", border: "none",
                 borderRadius: "50%", width: "36px", height: "36px",
                 color: "white", cursor: "pointer", fontSize: "18px",
-                opacity: navHovered ? 1 : 0,
-                transition: "opacity 0.2s ease",
+                opacity: (useOverlayMode ? controlsVisible : true) && navHovered ? 1 : 0,
+                transition: "opacity 0.3s ease",
               }}
               aria-label="Previous"
             >&#10094;</button>
@@ -359,8 +378,8 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
                 backgroundColor: "rgba(0,0,0,0.6)", border: "none",
                 borderRadius: "50%", width: "36px", height: "36px",
                 color: "white", cursor: "pointer", fontSize: "18px",
-                opacity: navHovered ? 1 : 0,
-                transition: "opacity 0.2s ease",
+                opacity: (useOverlayMode ? controlsVisible : true) && navHovered ? 1 : 0,
+                transition: "opacity 0.3s ease",
               }}
               aria-label="Next"
             >&#10095;</button>
@@ -406,10 +425,19 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
         {isVideo && videoRef.current && (
           <div
             style={{
-              ...controlBarStyle,
+              ...overlayFade,
+              ...(useOverlayMode ? {
+                position: "absolute",
+                bottom: 0,
+                left: 0, right: 0,
+                zIndex: 20,
+                paddingBottom: "60px",
+                background: "linear-gradient(to top, rgba(0,0,0,0.88) 0%, transparent 100%)",
+              } : {
+                background: "var(--surface)",
+              }),
               padding: "8px 12px",
-              backgroundColor: "rgba(0,0,0,0.85)",
-              borderTop: "1px solid var(--border)",
+              borderTop: "none",
               display: "flex",
               flexDirection: "column",
               gap: "6px",
@@ -419,23 +447,23 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
           >
             {/* Seek Bar */}
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ fontSize: "11px", color: "white", minWidth: "32px" }}>{formatTime(currentTime)}</span>
+              <span style={{ fontSize: "11px", color: useOverlayMode ? "white" : "var(--text-muted)", minWidth: "32px" }}>{formatTime(currentTime)}</span>
               <input
                 type="range" min="0" max={duration || 100} step="0.1" value={currentTime}
                 onChange={handleSeekChange}
                 style={{ flex: 1, cursor: "pointer", accentColor: "var(--primary)" }}
               />
-              <span style={{ fontSize: "11px", color: "white", minWidth: "32px", textAlign: "right" }}>{formatTime(duration)}</span>
+              <span style={{ fontSize: "11px", color: useOverlayMode ? "white" : "var(--text-muted)", minWidth: "32px", textAlign: "right" }}>{formatTime(duration)}</span>
             </div>
 
             {/* Control row */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               {/* Left: play/mute/volume */}
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                <button onClick={togglePlay} style={{ background: "none", border: "none", color: "white", cursor: "pointer", fontSize: "13px", minWidth: "36px" }}>
+                <button onClick={togglePlay} style={{ background: "none", border: "none", color: useOverlayMode ? "white" : "var(--text)", cursor: "pointer", fontSize: "13px", minWidth: "36px" }}>
                   {isPlaying ? "⏸" : "▶"}
                 </button>
-                <button onClick={toggleMute} style={{ background: "none", border: "none", color: "white", cursor: "pointer", fontSize: "13px" }}>
+                <button onClick={toggleMute} style={{ background: "none", border: "none", color: useOverlayMode ? "white" : "var(--text)", cursor: "pointer", fontSize: "13px" }}>
                   {isMuted || volume === 0 ? "🔇" : volume < 0.4 ? "🔈" : "🔊"}
                 </button>
                 <input
@@ -450,7 +478,7 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
               <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                 <button
                   onClick={handleRotateCCW}
-                  style={{ background: "none", border: "1px solid var(--border)", borderRadius: "4px", color: "white", cursor: "pointer", padding: "2px 5px", fontSize: "12px" }}
+                  style={{ background: "none", border: "1px solid var(--border)", borderRadius: "4px", color: useOverlayMode ? "white" : "var(--text)", cursor: "pointer", padding: "2px 5px", fontSize: "12px" }}
                   title="Rotate left (CCW)"
                 >↺</button>
                 {rotation !== 0 && (
@@ -462,24 +490,24 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
                 )}
                 <button
                   onClick={handleRotateCW}
-                  style={{ background: "none", border: "1px solid var(--border)", borderRadius: "4px", color: "white", cursor: "pointer", padding: "2px 5px", fontSize: "12px" }}
+                  style={{ background: "none", border: "1px solid var(--border)", borderRadius: "4px", color: useOverlayMode ? "white" : "var(--text)", cursor: "pointer", padding: "2px 5px", fontSize: "12px" }}
                   title="Rotate right (CW)"
                 >↻</button>
                 <select
                   value={speed} onChange={handleSpeedChange}
-                  style={{ backgroundColor: "transparent", color: "white", border: "1px solid var(--border)", borderRadius: "4px", padding: "2px 4px", fontSize: "11px", cursor: "pointer" }}
+                  style={{ backgroundColor: "var(--surface-hover)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: "4px", padding: "2px 4px", fontSize: "11px", cursor: "pointer" }}
                 >
-                  <option value="0.5" style={{ color: "black" }}>0.5×</option>
-                  <option value="1.0" style={{ color: "black" }}>1×</option>
-                  <option value="1.5" style={{ color: "black" }}>1.5×</option>
-                  <option value="2.0" style={{ color: "black" }}>2×</option>
+                  <option value="0.5">0.5×</option>
+                  <option value="1.0">1×</option>
+                  <option value="1.5">1.5×</option>
+                  <option value="2.0">2×</option>
                 </select>
                 <button
                   onClick={toggleAutoplay}
                   style={{
                     background: localAutoplay ? "var(--primary)" : "transparent",
                     border: "1px solid var(--border)", borderRadius: "4px",
-                    color: "white", cursor: "pointer", padding: "2px 6px", fontSize: "10px",
+                    color: useOverlayMode ? "white" : "var(--text)", cursor: "pointer", padding: "2px 6px", fontSize: "10px",
                   }}
                   title={localAutoplay ? "Autoplay ON — click to disable" : "Autoplay OFF — click to enable"}
                 >
@@ -506,7 +534,17 @@ export const PreviewModal: React.FC<PreviewModalProps> = ({
         )}
 
         {/* Footer */}
-        <div className="modal-footer">
+        <div
+          className="modal-footer"
+          style={useOverlayMode ? {
+            ...overlayFade,
+            position: "absolute",
+            bottom: 0, left: 0, right: 0,
+            zIndex: 21,
+            background: "transparent",
+            borderTop: "none",
+          } : isVideo ? { borderTop: "none" } : undefined}
+        >
           <Button variant="secondary" onClick={handleClose}>Back</Button>
           <div style={{ display: "flex", gap: "8px" }}>
             <Button onClick={() => DownloaderService.downloadItem(media)}>Download</Button>
