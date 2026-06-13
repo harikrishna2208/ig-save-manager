@@ -1,0 +1,63 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+out/
+
+# TypeScript
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDEs
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Coverage
+coverage/
+
+# Temporary files
+.tmp/
+.temp/
+
+# Cache
+.cache/
+.parcel-cache/
+.eslintcache
+
+# Webpack
+dist-ssr/
+
+# Package manager
+.pnpm-store/
+
+# Chrome extension packaging
+*.zip
+*.crx
+
+# Optional: generated source maps
+*.map
+
+project_knowledge.md
